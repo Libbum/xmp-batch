@@ -1,47 +1,72 @@
-extern crate rexiv2;
 extern crate failure;
-extern crate quick_xml;
+extern crate globwalk;
+extern crate rexiv2;
+extern crate serde_yaml;
+#[macro_use]
+extern crate serde_derive;
+extern crate url;
+extern crate url_serde;
 
 use failure::Error;
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use globwalk::DirEntry;
+use std::fs::File;
+use url::Url;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct Attribution {
+    marked: bool,
+    usage_terms: String,
+    #[serde(with = "url_serde")]
+    web_statement: Url,
+    #[serde(with = "url_serde")]
+    license: Url,
+    #[serde(with = "url_serde")]
+    more_permissions: Url,
+    #[serde(with = "url_serde")]
+    attribution_url: Url,
+    attribution_name: String,
+}
 
 fn main() -> Result<(), Error> {
-    let mut reader = Reader::from_file("by-nc-sa.xmp")?;
-    reader.trim_text(true);
 
-    let mut count = 0;
-    let mut txt = Vec::new();
-    let mut buf = Vec::new();
+    let attribution_file = File::open("attribution.yaml")?;
+    let attrib: Attribution = serde_yaml::from_reader(attribution_file)?;
 
-    // The `Reader` does not implement `Iterator` because it outputs borrowed data (`Cow`s)
-    loop {
-        match reader.read_event(&mut buf) {
-            // for triggering namespaced events, use this instead:
-            // match reader.read_namespaced_event(&mut buf) {
-            Ok(Event::Start(ref e)) => {
-                // for namespaced:
-                // Ok((ref namespace_value, Event::Start(ref e)))
-                match e.name() {
-                    b"rdf:RDF" => {println!(
-                        "attributes values: {:?}",
-                        e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
-                    )},
-                    b"rdf:Description" => count += 1,
-                    _ => (),
-                }
-            }
-            // unescape and decode the text event using the reader encoding
-            Ok(Event::Text(e)) => txt.push(e.unescape_and_decode(&reader).unwrap()),
-            Ok(Event::Eof) => break, // exits the loop when reaching end of file
-            Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
-            _ => (), // There are several other `Event`s we do not consider here
-        }
+    let walker = globwalk::GlobWalkerBuilder::from_patterns(
+        "images",
+        &["*.{png,jpg,jpeg,PNG,JPG,JPEG}", "!*_small*", "!*_blur*", "!*_thumb*"], //Don't worry about thumbnails
+    )
+    .follow_links(true)
+    .build()?
+    .into_iter()
+    .filter_map(Result::ok)
+    .collect::<Vec<DirEntry>>();
 
-        // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
-        buf.clear();
+    for file in walker.iter() {
+        println!("Writing metadata to: {}", file.path().display());
+        let meta = rexiv2::Metadata::new_from_path(&file.path())?;
+        //Blanket clear all xmp data. TODO: this needs a better solution.
+        meta.clear_xmp();
+        rexiv2::unregister_all_xmp_namespaces();
+        rexiv2::register_xmp_namespace("http://creativecommons.org/ns#/", "cc")?;
+
+        let marked = match attrib.marked {
+            true => "True",
+            false => "False",
+        };
+
+        meta.set_tag_string("Xmp.xmpRights.Marked", marked)?;
+        meta.set_tag_string("Xmp.xmpRights.UsageTerms", &attrib.usage_terms)?;
+        meta.set_tag_string("Xmp.dc.rights", &attrib.usage_terms)?;
+        meta.set_tag_string("Xmp.xmpRights.WebStatement", attrib.web_statement.as_str())?;
+        meta.set_tag_string("Xmp.cc.license", attrib.license.as_str())?;
+        meta.set_tag_string("Xmp.cc.morePermissions", attrib.more_permissions.as_str())?;
+        meta.set_tag_string("Xmp.cc.attributionURL", attrib.attribution_url.as_str())?;
+        meta.set_tag_string("Xmp.cc.attributionName", &attrib.attribution_name)?;
+
+        meta.save_to_file(&file.path())?;
     }
-    println!("{}", count);
-    println!("{:?}", txt);
+
     Ok(())
 }

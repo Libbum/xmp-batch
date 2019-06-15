@@ -1,0 +1,8 @@
+# Unfortunately, for the moment `serde_yaml` does not support anchors, so there is a need to repeat yourself a bit here. I'll work on fixing that upstream in the near future.
+Marked: false
+UsageTerms: This work is licensed to the public under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License http://creativecommons.org/licenses/by-nc-sa/4.0/ verify at https://example.com/cc/
+WebStatement: https://example.com/cc/
+License: http://creativecommons.org/licenses/by-nc-sa/4.0/
+MorePermissions: https://example.com/license/
+AttributionUrl: https://example.com/
+AttributionName: John Smith
