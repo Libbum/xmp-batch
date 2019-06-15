@@ -1,0 +1,2 @@
+#pattern  filter=crypt diff=crypt
+attribution.yaml filter=crypt diff=crypt
